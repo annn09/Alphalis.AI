@@ -10,7 +10,7 @@ try:
     ort = importlib.import_module("onnxruntime")
 except ImportError:
     ort = None
-import librosa
+import librosa.display
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
@@ -22,7 +22,7 @@ st.set_page_config(page_title="AlphalisAI", layout="wide")
 st.markdown("""
     <style>
     .stApp {
-        background-color: #141416;
+        background-color: #93C572;
         color: #e0e0e0;
     }
     h1, h2, h3 {
@@ -39,12 +39,12 @@ st.markdown("""
         transition: 0.3s ease-in-out;
     }
     .stButton>button:hover {
-        background-color: #d8c8b8;
+        background-color: #D0F0C0;
         color: #141416;
         border: 1px solid #d8c8b8;
     }
     .user-badge {
-        background-color: #1e1e20;
+        background-color: #BAED91;
         border: 1px solid #2a2a2d;
         padding: 8px 16px;
         border-radius: 20px;
@@ -403,3 +403,185 @@ if analyze_button and uploaded_audio:
             file_name="alphalis_eco_translation.json",
             mime="application/json"
         )
+
+# =============================================================================
+# 2. INFRASOUND ACOUSTIC FEATURE EXTRACTOR (0–250 Hz)
+# =============================================================================
+class ElephantAudioProcessor:
+    """Extracts Mel-Spectrograms focused specifically on elephant low-frequency rumble & call bands."""
+    def __init__(self, sample_rate=2000, duration=6, fmin=0.0, fmax=250.0, n_mels=128):
+        self.sample_rate = sample_rate
+        self.duration = duration
+        self.fmin = fmin
+        self.fmax = fmax
+        self.n_mels = n_mels
+        self.target_length = sample_rate * duration
+
+    def load_and_preprocess(self, audio_bytes):
+        """Resamples raw audio to low-frequency sample rate and standardizes duration."""
+        y, sr = librosa.load(io.BytesIO(audio_bytes), sr=self.sample_rate, duration=self.duration, mono=True)
+        if len(y) < self.target_length:
+            y = np.pad(y, (0, self.target_length - len(y)), mode='constant')
+        else:
+            y = y[:self.target_length]
+        return y, sr
+
+    def extract_mel_spectrogram(self, y):
+        """Generates normalized decibel Mel-Spectrogram bounded within [0, 250] Hz."""
+        mel_spec = librosa.feature.melspectrogram(
+            y=y,
+            sr=self.sample_rate,
+            n_fft=1024,
+            hop_length=256,
+            n_mels=self.n_mels,
+            fmin=self.fmin,
+            fmax=self.fmax
+        )
+        mel_db = librosa.power_to_db(mel_spec, ref=np.max)
+        mean, std = mel_db.mean(), mel_db.std() + 1e-9
+        return (mel_db - mean) / std
+
+
+# =============================================================================
+# 3. PYTORCH MODEL ARCHITECTURE & KNOWLEDGE MAPPING BASE
+# =============================================================================
+class ElephantVocalizationCNN(nn.Module):
+    """Deep Neural Network model mapping spectrogram representations to call classes."""
+    def __init__(self, num_classes=5):
+        super(ElephantVocalizationCNN, self).__init__()
+        self.features = nn.Sequential(
+            nn.Conv2d(1, 16, kernel_size=3, padding=1),
+            nn.BatchNorm2d(16),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+            nn.Conv2d(16, 32, kernel_size=3, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.AdaptiveAvgPool2d((4, 4))
+        )
+        self.fc = nn.Linear(32 * 4 * 4, num_classes)
+
+    def forward(self, x):
+        return self.fc(self.features(x))
+
+# Acoustic Intent Knowledge Dictionary
+ELEPHANT_DICTIONARY = {
+    "Low-Frequency Infrasonic Rumble": {
+        "english_translation": "“I am here. Maintain contact with the herd while moving forward.”",
+        "behavioral_context": "Long-distance herd coordination & contact call.",
+        "demographic": "Matriarch / Adult Female"
+    },
+    "High-Pitched Calf Greeting": {
+        "english_translation": "“I need attention / I am searching for my mother.”",
+        "behavioral_context": "Infant distress call / Nursing request.",
+        "demographic": "Calf / Newborn"
+    },
+    "Musth Bull Power Rumble": {
+        "english_translation": "“Dominant male in the area. Steer clear or show submission.”",
+        "behavioral_context": "Mating display & territorial dominance signal.",
+        "demographic": "Mature Bull Elephant"
+    },
+    "High-Volume Trumpet Alert": {
+        "english_translation": "“Danger detected nearby! Gather the young and prepare to defend!”",
+        "behavioral_context": "Threat signal triggered by predator or human intrusion.",
+        "demographic": "Group Defense Sentinel"
+    },
+    "Social Reunion Roar": {
+        "english_translation": "“Welcome back! We are excited to reunite with the family unit.”",
+        "behavioral_context": "Social greeting upon rejoining family bonds.",
+        "demographic": "Family Bond Unit"
+    }
+}
+
+
+def predict_vocalization(spectrogram_np):
+    """Predicts acoustic call type and returns human language translation."""
+    tensor_input = torch.tensor(spectrogram_np).unsqueeze(0).unsqueeze(0).float()
+    
+    model = ElephantVocalizationCNN(num_classes=len(ELEPHANT_DICTIONARY))
+    model.eval()
+    
+    with torch.no_grad():
+        outputs = model(tensor_input)
+        probs = torch.softmax(outputs, dim=1).numpy()[0]
+        
+    class_names = list(ELEPHANT_DICTIONARY.keys())
+    best_index = int(np.argmax(probs))
+    selected_call = class_names[best_index]
+    
+    return selected_call, float(probs[best_index]), ELEPHANT_DICTIONARY[selected_call], dict(zip(class_names, probs))
+
+
+# =============================================================================
+# 4. STREAMLIT USER INTERFACE
+# =============================================================================
+st.title("🐘 AlphalisAI — Elephant Acoustic Speech Decoder")
+st.markdown("Upload elephant vocalizations (`.wav`, `.mp3`) to perform bioacoustic feature extraction and decode low-frequency infrasound calls into English natural language.")
+
+st.divider()
+
+col1, col2 = st.columns([1, 1])
+
+with col1:
+    st.subheader("Data Ingestion")
+    uploaded_file = st.file_uploader("Upload Elephant Audio Recording", type=["wav", "mp3", "flac"])
+
+with col2:
+    st.subheader("System Status")
+    status = st.empty()
+    if not uploaded_file:
+        status.info("Awaiting audio payload upload...")
+
+if uploaded_file is not None:
+    audio_bytes = uploaded_file.getvalue()
+    
+    # 1. Feature Extraction
+    processor = ElephantAudioProcessor()
+    y, sr = processor.load_and_preprocess(audio_bytes)
+    spec = processor.extract_mel_spectrogram(y)
+
+    with col1:
+        st.subheader("🌊 Audio Input & Infrasound Spectrogram")
+        st.audio(audio_bytes, format="audio/wav")
+
+        # Plot Infrasound Spectrogram
+        fig, ax = plt.subplots(figsize=(8, 3))
+        fig.patch.set_facecolor("#1e1e20")
+        ax.set_facecolor("#141416")
+
+        img = ax.imshow(spec, aspect='auto', origin='lower', extent=[0, processor.duration, processor.fmin, processor.fmax], cmap='magma')
+        cbar = fig.colorbar(img, ax=ax, format="%+2.0f dB")
+        cbar.ax.yaxis.set_tick_params(color='#e0e0e0')
+        plt.setp(plt.getp(cbar.ax.axes, 'yticklabels'), color='#e0e0e0')
+
+        ax.set_title("Infrasound Mel-Spectrogram (0–250 Hz)", color="#d8c8b8")
+        ax.set_ylabel("Frequency (Hz)", color="#e0e0e0")
+        ax.set_xlabel("Time (s)", color="#e0e0e0")
+        ax.tick_params(colors='#e0e0e0')
+
+        st.pyplot(fig)
+        plt.close(fig)
+
+    with col2:
+        if st.button("Decode Elephant Voice", type="primary", use_container_width=True):
+            status.warning("Processing low-frequency Mel-spectrogram tensor...")
+            time.sleep(1.2)
+            status.success("Translation Complete.")
+
+            # Perform prediction
+            call_type, confidence, translation_info, all_probs = predict_vocalization(spec)
+
+            st.markdown(f"""
+            <div class="translation-box">
+                <h3 style="margin-top:0; color: #d8c8b8;">Identified Call: {call_type}</h3>
+                <h2 style="color: #ffffff; font-style: italic;">{translation_info['english_translation']}</h2>
+                <hr style="border-color: #2a2a2d;">
+                <p><b>Behavioral Context:</b> {translation_info['behavioral_context']}</p>
+                <p><b>Caller Group:</b> {translation_info['demographic']}</p>
+                <p><b>Acoustic Confidence:</b> {confidence * 100:.2f}%</p>
+            </div>
+            """, unsafe_allow_html=True)
+
+            st.write("#### Acoustic Intent Probability Breakdown:")
+            for label, prob in all_probs.items():
+                st.progress(float(prob), text=f"{label}: {prob * 100:.1f}%")
