@@ -1,41 +1,26 @@
-import streamlit as st
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import networkx as nx
-import time
+import os
+import io
+import tempfile
 import torch
+import torch.nn as nn
+import onnxruntime as ort
+import librosa.display
+from sklearn.decomposition import PCA
 
-
-user_login = st.text_input("Enter your login: ")
-user_password = st.text_input("Enter your password: ", type="password")
-
-# 1. Page Configuration
 st.set_page_config(page_title="AlphalisAI", layout="wide")
 
-# 2. Injecting Custom CSS for a Dark, Minimalist, and Soft Aesthetic
 st.markdown("""
     <style>
-    /* Dark, dreamy background */
     .stApp {
         background-color: #141416;
         color: #e0e0e0;
     }
-    /* Soft, vintage typography for headers */
     h1, h2, h3 {
         color: #d8c8b8; 
         font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
         font-weight: 300;
         letter-spacing: 1px;
     }
-    /* Minimalist card containers */
-    div.css-1r6slb0, div.css-12oz5g7 {
-        background-color: #1e1e20;
-        border-radius: 12px;
-        padding: 20px;
-        border: 1px solid #2a2a2d;
-    }
-    /* Soft interactive buttons */
     .stButton>button {
         background-color: #242426;
         color: #d8c8b8;
@@ -48,82 +33,129 @@ st.markdown("""
         color: #141416;
         border: 1px solid #d8c8b8;
     }
+    .user-badge {
+        background-color: #1e1e20;
+        border: 1px solid #2a2a2d;
+        padding: 8px 16px;
+        border-radius: 20px;
+        color: #d8c8b8;
+        font-size: 14px;
+        display: inline-block;
+    }
     </style>
 """, unsafe_allow_html=True)
 
-# 3. Application Header
-st.title("AlphalisAI")
-st.markdown("Map complex ecological rules by fusing audio embeddings with spatial telemetry.")
-st.divider()
+# Initialize Session State Variables
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+if "user_email" not in st.session_state:
+    st.session_state.user_email = ""
 
-# 4. Sidebar for Model Parameters
-with st.sidebar:
-    st.header("Pipeline Parameters")
-    confidence_threshold = st.slider("Embedding Confidence Threshold", 0.0, 1.0, 0.75)
-    st.write("Graph Architecture Settings:")
-    edge_weight = st.selectbox("Edge Weight Metric", ["Physical Distance", "Social Hierarchy", "Acoustic Overlap"])
 
-# 5. Main Layout: Upload & Processing
-col1, col2 = st.columns([1, 1])
-
-with col1:
-    st.subheader("Data Ingestion")
-    uploaded_audio = st.file_uploader("Upload Acoustic Data (.wav)", type=['wav'])
-    uploaded_telemetry = st.file_uploader("Upload Spatial Telemetry (.csv)", type=['csv'])
+# =============================================================================
+# 2. SCREEN 1: LOGIN PAGE
+# =============================================================================
+def render_login_page():
+    # Center the login form on the page
+    _, login_col, _ = st.columns([1, 2, 1])
     
-    analyze_button = st.button("Generate Ecological Translation")
+    with login_col:
+        st.markdown("<h1 style='text-align: center;'>AlphalisAI</h1>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #a0a0a0;'>Sign in to access your ecological workspace</p>", unsafe_allow_html=True)
+        st.write("")
+        
+        with st.form("login_form"):
+            email_input = st.text_input("Enter your email:")
+            password_input = st.text_input("Enter your password:", type="password")
+            submit_button = st.form_submit_button("Sign In", use_container_width=True)
+            
+            if submit_button:
+                if email_input.strip() != "" and password_input.strip() != "":
+                    st.session_state.logged_in = True
+                    st.session_state.user_email = email_input.strip()
+                    st.rerun()  # Instantly refresh to show Workspace
+                else:
+                    st.error("Please enter both an email and password.")
 
-with col2:
-    st.subheader("System Status")
-    status_text = st.empty()
-    if not uploaded_audio:
-        status_text.info("Awaiting data streams...")
 
-# 6. Mock Inference & Visualization Logic
-if analyze_button and uploaded_audio:
-    with col2:
-        status_text.warning("Extracting Audio Embeddings via AVES...")
-        time.sleep(1.5) # Mocking PyTorch processing time
-        status_text.warning("Constructing Social-Spatial Graph...")
-        time.sleep(1.5)
-        status_text.success("Translation Complete.")
-    
+# =============================================================================
+# 3. SCREEN 2: MAIN WORKSPACE PAGE
+# =============================================================================
+def render_workspace_page():
+    # Top Bar: User Profile Info & Logout Button
+    header_col1, header_col2 = st.columns([3, 1])
+    with header_col1:
+        st.title("AlphalisAI")
+        st.markdown("Map complex ecological rules by fusing audio embeddings with spatial telemetry.")
+    with header_col2:
+        st.write("")
+        st.markdown(f"<div class='user-badge'>👤 {st.session_state.user_email}</div>", unsafe_allow_html=True)
+        if st.button("Log Out"):
+            st.session_state.logged_in = False
+            st.session_state.user_email = ""
+            st.rerun()
+
     st.divider()
-    
-    # Results Section
-    st.subheader("Predicted Behavioral Translation")
-    st.write("**Ecological Intent:** Coordinated directional shift (Foraging behavior triggered by acoustic pulse).")
-    
-    # Generate a mock visualization of the Spatiotemporal Graph
-    st.write("### Spatial Network Impact")
-    
-    # Mocking the Graph Neural Network output using NetworkX
-    fig, ax = plt.subplots(figsize=(8, 4))
-    fig.patch.set_facecolor("#C4C4F8") # Match the dark UI background
-    ax.set_facecolor("#EBBEF5")
-    
-    G = nx.erdos_renyi_graph(n=8, p=0.4, seed=42)
-    pos = nx.spring_layout(G)
-    
-    nx.draw_networkx_nodes(G, pos, node_size=500, node_color='#d8c8b8', ax=ax)
-    nx.draw_networkx_edges(G, pos, edge_color="#F1A0A0", ax=ax)
-    nx.draw_networkx_labels(G, pos, font_size=10, font_color="#141416", font_family="sans-serif", ax=ax)
-    
-    ax.axis('off')
-    st.pyplot(fig)
+
+    # Sidebar for Model Parameters (Only visible after login)
+    with st.sidebar:
+        st.header("Pipeline Parameters")
+        confidence_threshold = st.slider("Embedding Confidence Threshold", 0.0, 1.0, 0.75)
+        st.write("Graph Architecture Settings:")
+        edge_weight = st.selectbox("Edge Weight Metric", ["Physical Distance", "Social Hierarchy", "Acoustic Overlap"])
+
+    # Main Layout: Upload & Processing
+    col1, col2 = st.columns([1, 1])
+
+    with col1:
+        st.subheader("Data Ingestion")
+        uploaded_audio = st.file_uploader("Upload Acoustic Data (.wav)", type=['wav'])
+        uploaded_telemetry = st.file_uploader("Upload Spatial Telemetry (.csv)", type=['csv'])
+        analyze_button = st.button("Generate Ecological Translation", type="primary")
+
+    with col2:
+        st.subheader("System Status")
+        status_text = st.empty()
+        if not uploaded_audio:
+            status_text.info("Awaiting data streams...")
+
+    # Inference & Output Section
+    if analyze_button and uploaded_audio:
+        with col2:
+            status_text.warning("Extracting Audio Embeddings via AVES...")
+            time.sleep(1.0)
+            status_text.warning("Constructing Social-Spatial Graph...")
+            time.sleep(1.0)
+            status_text.success("Translation Complete.")
+        
+        st.divider()
+        st.subheader("Predicted Behavioral Translation")
+        st.write("**Ecological Intent:** Coordinated directional shift (Foraging behavior triggered by acoustic pulse).")
+        
+        st.write("### Spatial Network Impact")
+        fig, ax = plt.subplots(figsize=(8, 4))
+        fig.patch.set_facecolor("#1e1e20")
+        ax.set_facecolor("#141416")
+        
+        G = nx.erdos_renyi_graph(n=8, p=0.4, seed=42)
+        pos = nx.spring_layout(G)
+        
+        nx.draw_networkx_nodes(G, pos, node_size=500, node_color='#d8c8b8', ax=ax)
+        nx.draw_networkx_edges(G, pos, edge_color="#404044", ax=ax)
+        nx.draw_networkx_labels(G, pos, font_size=10, font_color="#141416", font_family="sans-serif", ax=ax)
+        
+        ax.axis('off')
+        st.pyplot(fig)
+        plt.close(fig)
+
 
 # =============================================================================
-# CONTINUATION: INFRASOUND BIOACOUSTIC & UNSUPERVISED CLUSTERING ENGINE
+# 4. MAIN APPLICATION ROUTER
 # =============================================================================
-
-import os
-import io
-import tempfile
-import torch
-import torch.nn as nn
-import onnxruntime as ort
-import librosa.display
-from sklearn.decomposition import PCA
+if not st.session_state.logged_in:
+    render_login_page()
+else:
+    render_workspace_page()
 
 # -----------------------------------------------------------------------------
 # 7. INFRASOUND FEATURE EXTRACTION ENGINE (0–250 Hz Range)
