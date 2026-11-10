@@ -10,7 +10,7 @@ try:
     ort = importlib.import_module("onnxruntime")
 except ImportError:
     ort = None
-import librosa.display
+import librosa
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
