@@ -1,7 +1,9 @@
 streamlit
-pandas
-numpy
+librosa
 matplotlib
 networkx
+numpy
+pandas
 torch
-librosa 
+onnxruntime
+scikit-learn
