@@ -1,11 +1,21 @@
 import os
 import io
+import importlib
 import tempfile
+import time
 import torch
 import torch.nn as nn
-import onnxruntime as ort
+import streamlit as st
+try:
+    ort = importlib.import_module("onnxruntime")
+except ImportError:
+    ort = None
 import librosa.display
+import matplotlib.pyplot as plt
+import networkx as nx
+import numpy as np
 from sklearn.decomposition import PCA
+
 
 st.set_page_config(page_title="AlphalisAI", layout="wide")
 
@@ -82,6 +92,8 @@ def render_login_page():
 # 3. SCREEN 2: MAIN WORKSPACE PAGE
 # =============================================================================
 def render_workspace_page():
+    global analyze_button, uploaded_audio, confidence_threshold
+
     # Top Bar: User Profile Info & Logout Button
     header_col1, header_col2 = st.columns([3, 1])
     with header_col1:
@@ -152,6 +164,10 @@ def render_workspace_page():
 # =============================================================================
 # 4. MAIN APPLICATION ROUTER
 # =============================================================================
+analyze_button = False
+uploaded_audio = None
+confidence_threshold = 0.75
+
 if not st.session_state.logged_in:
     render_login_page()
 else:
@@ -246,6 +262,8 @@ def ensure_onnx_model_exists(onnx_path="models/model.onnx"):
 class ONNXInferenceEngine:
     """Decoupled inference runner for zero-overhead prediction server deployment."""
     def __init__(self, onnx_model_path="models/model.onnx"):
+        if ort is None:
+            raise ImportError("onnxruntime is required. Install it with: pip install onnxruntime")
         ensure_onnx_model_exists(onnx_model_path)
         self.session = ort.InferenceSession(onnx_model_path, providers=['CPUExecutionProvider'])
         self.input_name = self.session.get_inputs()[0].name
